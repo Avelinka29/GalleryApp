@@ -1,24 +1,34 @@
 import UIKit
 
-// In UIKit, UIViewController belongs to the View layer of MVVM.
+// UIKit controllers belong to the View layer of MVVM.
 final class ViewController: UIViewController {
     private let viewModel: GalleryViewModel
-    private let collectionView = UICollectionView(
-        frame: .zero,
-        collectionViewLayout: makeLayout()
-    )
-    private let cellRegistration = UICollectionView.CellRegistration<PhotoCell, LocalPhoto> { cell, _, photo in
-        cell.configure(with: photo)
+    private let imageLoader: any ImageLoading
+    var onOpenAttribution: ((URL) -> Void)?
+    private let collectionView = UICollectionView(frame: .zero, collectionViewLayout: GalleryLayout.make())
+    private let refreshControl = UIRefreshControl()
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let statusLabel = UILabel()
+    private let retryButton = UIButton(type: .system)
+    private let footer = UIStackView()
+    private var renderedPhotos: [Photo] = []
+    private typealias PhotoRegistration = UICollectionView.CellRegistration<PhotoCell, Photo>
+    private lazy var cellRegistration = PhotoRegistration { [weak self] cell, _, photo in
+        guard let self else { return }
+        cell.configure(with: photo, imageLoader: imageLoader) { [weak self] url in
+            self?.onOpenAttribution?(url)
+        }
     }
 
-    init(viewModel: GalleryViewModel) {
+    init(viewModel: GalleryViewModel, imageLoader: any ImageLoading) {
         self.viewModel = viewModel
+        self.imageLoader = imageLoader
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
-        // Only the retained, inactive Main.storyboard uses this initializer.
-        viewModel = GalleryViewModel(photos: [])
+        viewModel = GalleryViewModel(service: UnsplashPhotoService(accessKey: APIConfiguration.accessKey()))
+        imageLoader = ImageLoader()
         super.init(coder: coder)
     }
 
@@ -26,61 +36,106 @@ final class ViewController: UIViewController {
         super.viewDidLoad()
         title = viewModel.title
         view.backgroundColor = .systemBackground
-        configureCollectionView()
+        configureViews()
+        viewModel.onChange = { [weak self] in self?.render() }
+        render()
+        Task { await viewModel.loadNextPage() }
     }
 
-    private func configureCollectionView() {
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
+    private func configureViews() {
         collectionView.backgroundColor = .systemBackground
         collectionView.alwaysBounceVertical = true
         collectionView.allowsSelection = false
         collectionView.dataSource = self
+        collectionView.delegate = self
         collectionView.accessibilityIdentifier = "galleryGrid"
-        view.addSubview(collectionView)
-
+        collectionView.refreshControl = refreshControl
+        refreshControl.addTarget(self, action: #selector(refresh), for: .valueChanged)
+        statusLabel.font = .preferredFont(forTextStyle: .footnote)
+        statusLabel.adjustsFontForContentSizeCategory = true
+        statusLabel.numberOfLines = 0
+        statusLabel.textAlignment = .center
+        retryButton.setTitle("Повторить", for: .normal)
+        retryButton.addTarget(self, action: #selector(retry), for: .touchUpInside)
+        footer.axis = .vertical
+        footer.alignment = .center
+        footer.spacing = 4
+        for item in [spinner, statusLabel, retryButton] { footer.addArrangedSubview(item) }
+        let stack = UIStackView(arrangedSubviews: [collectionView, footer])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
         NSLayoutConstraint.activate([
-            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            collectionView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            collectionView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            statusLabel.widthAnchor.constraint(lessThanOrEqualTo: footer.widthAnchor, constant: -32)
         ])
     }
 
-    private static func makeLayout() -> UICollectionViewLayout {
-        UICollectionViewCompositionalLayout { _, environment in
-            let inset: CGFloat = 16
-            let spacing: CGFloat = 12
-            let availableWidth = environment.container.effectiveContentSize.width - inset * 2
-            // Use the actual container width, so rotation and iPad windows also work.
-            let columns = max(2, Int((availableWidth + spacing) / (150 + spacing)))
-            let side = max(1, (availableWidth - CGFloat(columns - 1) * spacing) / CGFloat(columns))
-            let item = NSCollectionLayoutItem(
-                layoutSize: NSCollectionLayoutSize(
-                    widthDimension: .absolute(side),
-                    heightDimension: .fractionalHeight(1)
-                )
-            )
-            let group = NSCollectionLayoutGroup.horizontal(
-                layoutSize: NSCollectionLayoutSize(
-                    widthDimension: .fractionalWidth(1),
-                    heightDimension: .absolute(side)
-                ),
-                repeatingSubitem: item,
-                count: columns
-            )
-            group.interItemSpacing = .fixed(spacing)
-
-            let section = NSCollectionLayoutSection(group: group)
-            section.interGroupSpacing = spacing
-            section.contentInsets = NSDirectionalEdgeInsets(
-                top: inset, leading: inset, bottom: inset, trailing: inset
-            )
-            return section
+    private func render() {
+        let photos = viewModel.photos
+        if renderedPhotos != photos {
+            let previousCount = renderedPhotos.count
+            let isAppend = !renderedPhotos.isEmpty
+                && photos.starts(with: renderedPhotos)
+                && photos.count > previousCount
+            renderedPhotos = photos
+            if isAppend {
+                collectionView.insertItems(at: (previousCount..<photos.count).map { IndexPath(item: $0, section: 0) })
+            } else {
+                collectionView.reloadData()
+            }
         }
+        if !viewModel.isLoading { refreshControl.endRefreshing() }
+        renderEmptyState()
+        footer.isHidden = viewModel.photos.isEmpty
+        spinner.isHidden = !viewModel.isLoading
+        if viewModel.isLoading { spinner.startAnimating() } else { spinner.stopAnimating() }
+        statusLabel.text = viewModel.errorMessage
+        statusLabel.isHidden = viewModel.errorMessage == nil
+        retryButton.isHidden = viewModel.errorMessage == nil
+        if !viewModel.isLoading && viewModel.errorMessage == nil {
+            footer.isHidden = true
+        }
+    }
+
+    private func renderEmptyState() {
+        guard viewModel.photos.isEmpty else {
+            contentUnavailableConfiguration = nil
+            return
+        }
+        if viewModel.isLoading {
+            var configuration = UIContentUnavailableConfiguration.loading()
+            configuration.text = "Загружаем фотографии…"
+            contentUnavailableConfiguration = configuration
+        } else {
+            var configuration = UIContentUnavailableConfiguration.empty()
+            let symbol = viewModel.errorMessage == nil ? "photo.on.rectangle" : "wifi.exclamationmark"
+            configuration.image = UIImage(systemName: symbol)
+            configuration.text = viewModel.errorMessage == nil ? "Фотографий пока нет" : "Не удалось загрузить"
+            configuration.secondaryText = viewModel.errorMessage
+            configuration.button.title = "Повторить"
+            configuration.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.retry() }
+            contentUnavailableConfiguration = configuration
+        }
+    }
+
+    @objc private func refresh() {
+        Task {
+            await viewModel.refresh()
+            refreshControl.endRefreshing()
+        }
+    }
+
+    @objc private func retry() {
+        Task { await viewModel.retry() }
     }
 }
 
-extension ViewController: UICollectionViewDataSource {
+extension ViewController: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         viewModel.numberOfPhotos
     }
@@ -94,5 +149,14 @@ extension ViewController: UICollectionViewDataSource {
             for: indexPath,
             item: viewModel.photo(at: indexPath.item)
         )
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplay cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        guard indexPath.item >= viewModel.numberOfPhotos - 6 else { return }
+        Task { await viewModel.loadNextPage() }
     }
 }
