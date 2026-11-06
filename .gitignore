@@ -1,0 +1,18 @@
+# macOS and personal Xcode settings
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Build products and tool caches
+DerivedData/
+build/
+.build/
+.swiftlint-cache/
+*.xcresult
+
+# Local API credentials (example files can be committed)
+.env
+.env.*
+!.env.example
+Secrets.xcconfig
+Secrets.plist
