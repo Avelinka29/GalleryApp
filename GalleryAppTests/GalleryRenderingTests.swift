@@ -28,6 +28,20 @@ struct GalleryRenderingTests {
         let cell = try #require(collection.cellForItem(at: IndexPath(item: 0, section: 0)) as? PhotoCell)
         #expect(collection.numberOfItems(inSection: 0) == 1)
         #expect(cell.accessibilityIdentifier == photo.id)
+
+        var selectedPhotos: [Photo] = []
+        var selectedIndex: Int?
+        var openedExternalLink = false
+        controller.onSelectPhoto = { photos, index in
+            selectedPhotos = photos
+            selectedIndex = index
+        }
+        controller.onOpenAttribution = { _ in openedExternalLink = true }
+        #expect(collection.allowsSelection)
+        collection.delegate?.collectionView?(collection, didSelectItemAt: IndexPath(item: 0, section: 0))
+        #expect(selectedPhotos == [photo])
+        #expect(selectedIndex == 0)
+        #expect(!openedExternalLink)
     }
 }
 

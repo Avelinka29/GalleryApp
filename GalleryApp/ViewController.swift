@@ -5,6 +5,7 @@ final class ViewController: UIViewController {
     private let viewModel: GalleryViewModel
     private let imageLoader: any ImageLoading
     var onOpenAttribution: ((URL) -> Void)?
+    var onSelectPhoto: (([Photo], Int) -> Void)?
     private let collectionView = UICollectionView(frame: .zero, collectionViewLayout: GalleryLayout.make())
     private let refreshControl = UIRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .medium)
@@ -47,7 +48,7 @@ final class ViewController: UIViewController {
         _ = cellRegistration
         collectionView.backgroundColor = .systemBackground
         collectionView.alwaysBounceVertical = true
-        collectionView.allowsSelection = false
+        collectionView.allowsSelection = true
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.accessibilityIdentifier = "galleryGrid"
@@ -138,6 +139,12 @@ final class ViewController: UIViewController {
 }
 
 extension ViewController: UICollectionViewDataSource, UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        guard viewModel.photo(at: indexPath.item) != nil else { return }
+        onSelectPhoto?(viewModel.photos, indexPath.item)
+    }
+
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         viewModel.numberOfPhotos
     }
