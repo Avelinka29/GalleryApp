@@ -9,9 +9,12 @@ protocol ImageLoading {
 final class ImageLoader: ImageLoading {
     private let cache = NSCache<NSURL, UIImage>()
     private let session: URLSession
+    private let thumbnailSize: CGSize
     private var requests: [URL: Task<UIImage, Error>] = [:]
 
-    init(session: URLSession? = nil) {
+    init(session: URLSession? = nil, maximumPixelSize: CGFloat = 600) {
+        let dimension = max(1, maximumPixelSize)
+        thumbnailSize = CGSize(width: dimension, height: dimension)
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = URLCache(
             memoryCapacity: 16 * 1_024 * 1_024,
@@ -28,12 +31,12 @@ final class ImageLoader: ImageLoading {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
         if let request = requests[url] { return try await request.value }
 
-        let request = Task<UIImage, Error> { [session] in
+        let request = Task<UIImage, Error> { [session, thumbnailSize] in
             let (data, response) = try await session.data(from: url)
             guard let response = response as? HTTPURLResponse,
                   (200..<300).contains(response.statusCode),
                   let image = UIImage(data: data),
-                  let thumbnail = await image.byPreparingThumbnail(ofSize: CGSize(width: 600, height: 600)) else {
+                  let thumbnail = await image.byPreparingThumbnail(ofSize: thumbnailSize) else {
                 throw PhotoServiceError.invalidResponse
             }
             return thumbnail
