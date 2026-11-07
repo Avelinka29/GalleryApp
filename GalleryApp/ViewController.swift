@@ -43,6 +43,8 @@ final class ViewController: UIViewController {
     }
 
     private func configureViews() {
+        // UIKit requires registration before the first cell-provider callback.
+        _ = cellRegistration
         collectionView.backgroundColor = .systemBackground
         collectionView.alwaysBounceVertical = true
         collectionView.allowsSelection = false
