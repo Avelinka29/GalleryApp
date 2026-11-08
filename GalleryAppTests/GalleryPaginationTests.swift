@@ -92,6 +92,26 @@ struct GalleryPaginationTests {
         #expect(query?.contains(URLQueryItem(name: "utm_source", value: "gallery_app")) == true)
     }
 
+    @Test("A cancelled request discards its late response and retries the same page")
+    func cancelledResponse() async throws {
+        let service = SuspendedPhotoService()
+        let model = GalleryViewModel(service: service)
+        let loading = Task { await model.loadNextPage() }
+        await service.waitUntilRequested()
+        loading.cancel()
+        service.finish(PhotoPage(photos: [try photo(id: "discarded")], hasMore: true))
+        await loading.value
+        #expect(model.photos.isEmpty)
+        #expect(model.errorMessage == nil)
+        #expect(!model.isLoading)
+        let retry = Task { await model.loadNextPage() }
+        await service.waitUntilRequested()
+        #expect(service.requestedPages == [1, 1])
+        service.finish(PhotoPage(photos: [try photo(id: "accepted")], hasMore: false))
+        await retry.value
+        #expect(model.photos.map(\.id) == ["accepted"])
+    }
+
     private func photo(id: String) throws -> Photo {
         let json = """
         {
