@@ -1,23 +1,23 @@
 import Foundation
 
-struct Photo: Decodable, Equatable, Sendable {
+struct Photo: Codable, Equatable, Sendable {
     let id: String
     let description: String?
     let altDescription: String?
     let urls: ImageURLs
     let user: Author
 
-    struct ImageURLs: Decodable, Equatable, Sendable {
+    struct ImageURLs: Codable, Equatable, Sendable {
         let small: URL
         let regular: URL
     }
 
-    struct Author: Decodable, Equatable, Sendable {
+    struct Author: Codable, Equatable, Sendable {
         let name: String
         let links: Links
     }
 
-    struct Links: Decodable, Equatable, Sendable {
+    struct Links: Codable, Equatable, Sendable {
         let html: URL
     }
 

@@ -1,7 +1,8 @@
 import Foundation
 
 @MainActor
-final class GalleryViewModel {
+final class GalleryViewModel: PhotoGridViewModel, FavouritesObserver {
+    let favourites: FavouritesStore?
     let title = "Галерея"
     private(set) var photos: [Photo] = []
     private(set) var isLoading = false
@@ -13,8 +14,14 @@ final class GalleryViewModel {
     private var nextPage = 1
     private var failedRefresh = false
 
-    init(service: any PhotoServicing) {
+    init(service: any PhotoServicing, favourites: FavouritesStore? = nil) {
         self.service = service
+        self.favourites = favourites
+        favourites?.observe(self)
+    }
+
+    func favouritesDidChange() {
+        onChange?()
     }
 
     var numberOfPhotos: Int { photos.count }

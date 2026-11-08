@@ -5,6 +5,8 @@ final class PhotoCell: UICollectionViewCell {
     private let spinner = UIActivityIndicatorView(style: .medium)
     private let retryButton = UIButton(type: .system)
     private let creditButton = UIButton(type: .system)
+    private let favouriteButton = UIButton(type: .system)
+    private var onFavourite: (() -> Void)?
     private var imageTask: Task<Void, Never>?
     private var photo: Photo?
     private var imageLoader: (any ImageLoading)?
@@ -26,6 +28,7 @@ final class PhotoCell: UICollectionViewCell {
         photo = nil
         imageLoader = nil
         onAttribution = nil
+        onFavourite = nil
         imageView.image = nil
         imageView.accessibilityLabel = nil
         creditButton.setTitle(nil, for: .normal)
@@ -42,6 +45,22 @@ final class PhotoCell: UICollectionViewCell {
         creditButton.setTitle("\(photo.user.name)\non Unsplash", for: .normal)
         creditButton.accessibilityLabel = "Автор: \(photo.user.name), Unsplash"
         loadImage()
+    }
+
+    func configureFavourite(selected: Bool, enabled: Bool, action: @escaping () -> Void) {
+        onFavourite = action
+        updateFavourite(selected: selected, enabled: enabled)
+    }
+
+    func updateFavourite(selected: Bool, enabled: Bool) {
+        favouriteButton.setImage(UIImage(systemName: selected ? "heart.fill" : "heart"), for: .normal)
+        favouriteButton.isEnabled = enabled
+        favouriteButton.accessibilityLabel = selected ? "Удалить из избранного" : "Добавить в избранное"
+        favouriteButton.accessibilityIdentifier = "favouriteButton"
+    }
+
+    @objc private func toggleFavourite() {
+        onFavourite?()
     }
 
     @objc private func loadImage() {
@@ -87,11 +106,23 @@ final class PhotoCell: UICollectionViewCell {
         retryButton.addTarget(self, action: #selector(loadImage), for: .touchUpInside)
         retryButton.isHidden = true
 
-        for subview in [imageView, spinner, retryButton, creditButton] {
+        favouriteButton.backgroundColor = .systemBackground
+        favouriteButton.layer.cornerRadius = 22
+        favouriteButton.tintColor = .systemRed
+        favouriteButton.addTarget(self, action: #selector(toggleFavourite), for: .touchUpInside)
+        for subview in [imageView, spinner, retryButton, creditButton, favouriteButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(subview)
         }
+        configureConstraints()
+    }
+
+    private func configureConstraints() {
         NSLayoutConstraint.activate([
+            favouriteButton.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            favouriteButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            favouriteButton.widthAnchor.constraint(equalToConstant: 44),
+            favouriteButton.heightAnchor.constraint(equalToConstant: 44),
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
