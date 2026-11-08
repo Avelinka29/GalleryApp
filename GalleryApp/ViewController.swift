@@ -2,7 +2,7 @@ import UIKit
 
 // UIKit controllers belong to the View layer of MVVM.
 final class ViewController: UIViewController {
-    private let viewModel: GalleryViewModel
+    private let viewModel: any PhotoGridViewModel
     private let imageLoader: any ImageLoading
     var onOpenAttribution: ((URL) -> Void)?
     var onSelectPhoto: (([Photo], Int) -> Void)?
@@ -16,12 +16,19 @@ final class ViewController: UIViewController {
     private typealias PhotoRegistration = UICollectionView.CellRegistration<PhotoCell, Photo>
     private lazy var cellRegistration = PhotoRegistration { [weak self] cell, _, photo in
         guard let self else { return }
+        cell.configureFavourite(
+            selected: viewModel.isFavourite(photo),
+            enabled: viewModel.canChangeFavourites
+        ) { [weak self] in
+            guard let self else { return }
+            Task { await self.viewModel.toggleFavourite(photo) }
+        }
         cell.configure(with: photo, imageLoader: imageLoader) { [weak self] url in
             self?.onOpenAttribution?(url)
         }
     }
 
-    init(viewModel: GalleryViewModel, imageLoader: any ImageLoading) {
+    init(viewModel: any PhotoGridViewModel, imageLoader: any ImageLoading) {
         self.viewModel = viewModel
         self.imageLoader = imageLoader
         super.init(nibName: nil, bundle: nil)
@@ -78,6 +85,10 @@ final class ViewController: UIViewController {
         ])
     }
 
+    private var displayedError: String? {
+        viewModel.errorMessage ?? viewModel.favouritesErrorMessage
+    }
+
     private func render() {
         let photos = viewModel.photos
         if renderedPhotos != photos {
@@ -92,15 +103,20 @@ final class ViewController: UIViewController {
                 collectionView.reloadData()
             }
         }
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard let cell = collectionView.cellForItem(at: indexPath) as? PhotoCell,
+                  let photo = viewModel.photo(at: indexPath.item) else { continue }
+            cell.updateFavourite(selected: viewModel.isFavourite(photo), enabled: viewModel.canChangeFavourites)
+        }
         if !viewModel.isLoading { refreshControl.endRefreshing() }
         renderEmptyState()
         footer.isHidden = viewModel.photos.isEmpty
         spinner.isHidden = !viewModel.isLoading
         if viewModel.isLoading { spinner.startAnimating() } else { spinner.stopAnimating() }
-        statusLabel.text = viewModel.errorMessage
-        statusLabel.isHidden = viewModel.errorMessage == nil
-        retryButton.isHidden = viewModel.errorMessage == nil
-        if !viewModel.isLoading && viewModel.errorMessage == nil {
+        statusLabel.text = displayedError
+        statusLabel.isHidden = displayedError == nil
+        retryButton.isHidden = displayedError == nil
+        if !viewModel.isLoading && displayedError == nil {
             footer.isHidden = true
         }
     }
@@ -116,10 +132,10 @@ final class ViewController: UIViewController {
             contentUnavailableConfiguration = configuration
         } else {
             var configuration = UIContentUnavailableConfiguration.empty()
-            let symbol = viewModel.errorMessage == nil ? "photo.on.rectangle" : "wifi.exclamationmark"
+            let symbol = displayedError == nil ? "photo.on.rectangle" : "wifi.exclamationmark"
             configuration.image = UIImage(systemName: symbol)
-            configuration.text = viewModel.errorMessage == nil ? "Фотографий пока нет" : "Не удалось загрузить"
-            configuration.secondaryText = viewModel.errorMessage
+            configuration.text = displayedError == nil ? viewModel.emptyMessage : "Не удалось загрузить"
+            configuration.secondaryText = displayedError
             configuration.button.title = "Повторить"
             configuration.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.retry() }
             contentUnavailableConfiguration = configuration
@@ -134,7 +150,13 @@ final class ViewController: UIViewController {
     }
 
     @objc private func retry() {
-        Task { await viewModel.retry() }
+        Task {
+            if viewModel.favouritesErrorMessage != nil {
+                await viewModel.retryFavourites()
+            } else {
+                await viewModel.retry()
+            }
+        }
     }
 }
 

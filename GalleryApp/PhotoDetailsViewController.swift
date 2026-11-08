@@ -16,7 +16,8 @@ final class PhotoDetailsViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = viewModel.title
+        viewModel.onChange = { [weak self] in self?.renderFavourite() }
+        renderFavourite()
         view.backgroundColor = .systemBackground
         view.accessibilityIdentifier = "photoDetails"
         pager.dataSource = self
@@ -33,6 +34,39 @@ final class PhotoDetailsViewController: UIViewController {
         pager.didMove(toParent: self)
         if let page = makePage(at: viewModel.selectedIndex) {
             pager.setViewControllers([page], direction: .forward, animated: false)
+        }
+    }
+
+    private func renderFavourite() {
+        title = viewModel.title
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: viewModel.isFavourite ? "heart.fill" : "heart"),
+            style: .plain, target: self, action: #selector(toggleFavourite)
+        )
+        button.tintColor = .systemRed
+        button.isEnabled = viewModel.canChangeFavourite
+        button.accessibilityLabel = viewModel.isFavourite ? "Удалить из избранного" : "Добавить в избранное"
+        button.accessibilityIdentifier = "detailFavouriteButton"
+        navigationItem.rightBarButtonItem = button
+    }
+
+    @objc private func toggleFavourite() {
+        changeFavourite(retrying: false)
+    }
+
+    private func changeFavourite(retrying: Bool) {
+        Task { [weak self] in
+            guard let self else { return }
+            let saved = retrying
+                ? await viewModel.retryFavourite()
+                : await viewModel.toggleFavourite()
+            guard !saved, let message = viewModel.errorMessage else { return }
+            let alert = UIAlertController(title: "Избранное", message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Закрыть", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Повторить", style: .default) { [weak self] _ in
+                self?.changeFavourite(retrying: true)
+            })
+            present(alert, animated: true)
         }
     }
 
