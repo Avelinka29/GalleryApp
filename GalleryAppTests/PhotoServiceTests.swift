@@ -78,6 +78,43 @@ struct PhotoServiceTests {
         #expect(firstImage.size.height <= 600)
     }
 
+    @Test("Invalid JSON is an explicit error, not an empty successful page")
+    func invalidJSON() async {
+        StubURLProtocol.configure(status: 200, headers: [:], data: Data("not JSON".utf8))
+        let service = UnsplashPhotoService(accessKey: "test-key", session: session())
+        do {
+            _ = try await service.fetchPhotos(page: 1)
+            Issue.record("Expected invalid-response error")
+        } catch {
+            #expect(error as? PhotoServiceError == .invalidResponse)
+        }
+    }
+
+    @Test("An expired key is reported as unauthorized")
+    func unauthorized() async {
+        StubURLProtocol.configure(status: 401, headers: [:], data: Data())
+        let service = UnsplashPhotoService(accessKey: "test-key", session: session())
+        do {
+            _ = try await service.fetchPhotos(page: 1)
+            Issue.record("Expected unauthorized error")
+        } catch {
+            #expect(error as? PhotoServiceError == .unauthorized)
+        }
+    }
+
+    @Test("An empty response ends pagination even when Link advertises a next page")
+    func emptyResponseWithNextLink() async throws {
+        StubURLProtocol.configure(
+            status: 200,
+            headers: ["Link": "<https://api.unsplash.com/photos?page=2>; rel=\"next\""],
+            data: Data("[]".utf8)
+        )
+        let service = UnsplashPhotoService(accessKey: "test-key", session: session())
+        let page = try await service.fetchPhotos(page: 1)
+        #expect(page.photos.isEmpty)
+        #expect(!page.hasMore)
+    }
+
     private func session() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
